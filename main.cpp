@@ -201,23 +201,196 @@ public:
     }
 };
 
-int main() {
-    std::vector<Flight> arr = generateFlights(2000, 52);
+/**
+ * @brief Красно-чёрное дерево (RBT) по ключу airline
+ *
+ * Самобалансирующееся дерево поиска. После каждой вставки восстанавливает
+ * 5 свойств RBT, что гарантирует высоту O(log n) и поиск за O(log n) даже
+ * в худшем случае. Ключи (airline) не уникальны — каждый узел хранит
+ * вектор всех рейсов с данным ключом.
+ *
+ * Используется узел-страж nil (общий чёрный лист) — это убирает проверки
+ * на nullptr: концы дерева и "отсутствующий дядя" указывают на nil.
+ */
+class RBTree {
+private:
+    enum Color { RED, BLACK };
 
-    BST tree;
+    struct Node {
+        std::string key;
+        std::vector<Flight> items;
+        Color color = RED;          // новый узел всегда красный
+        Node* left;
+        Node* right;
+        Node* parent;
+        Node(const std::string& k) : key(k) {}
+    };
+
+    Node* root;
+    Node* nil;   // страж: общий чёрный лист
+
+    /**
+     * @brief Левый поворот вокруг узла x (правый ребёнок поднимается)
+     */
+    void rotateLeft(Node* x) {
+        Node* y = x->right;
+        x->right = y->left;
+        if (y->left != nil) y->left->parent = x;
+        y->parent = x->parent;
+        if (x->parent == nil)            root = y;
+        else if (x == x->parent->left)   x->parent->left = y;
+        else                             x->parent->right = y;
+        y->left = x;
+        x->parent = y;
+    }
+
+    /**
+     * @brief Правый поворот вокруг узла x (левый ребёнок поднимается)
+     */
+    void rotateRight(Node* x) {
+        Node* y = x->left;
+        x->left = y->right;
+        if (y->right != nil) y->right->parent = x;
+        y->parent = x->parent;
+        if (x->parent == nil)            root = y;
+        else if (x == x->parent->right)  x->parent->right = y;
+        else                             x->parent->left = y;
+        y->right = x;
+        x->parent = y;
+    }
+
+    /**
+     * @brief Восстановление свойств RBT после вставки узла z
+     *
+     * Цикл работает, пока родитель z красный (нарушено правило 4).
+     * Внутри — разбор по цвету дяди: красный дядя (случай 1) — перекраска
+     * и подъём вверх; чёрный дядя (случаи 2 и 3) — повороты и перекраска.
+     */
+    void insertFixup(Node* z) {
+        while (z->parent->color == RED) {
+            if (z->parent == z->parent->parent->left) {
+                Node* uncle = z->parent->parent->right;
+                if (uncle->color == RED) {                 // случай 1
+                    z->parent->color = BLACK;
+                    uncle->color = BLACK;
+                    z->parent->parent->color = RED;
+                    z = z->parent->parent;
+                } else {
+                    if (z == z->parent->right) {           // случай 2 (зигзаг)
+                        z = z->parent;
+                        rotateLeft(z);
+                    }
+                    z->parent->color = BLACK;              // случай 3 (прямая)
+                    z->parent->parent->color = RED;
+                    rotateRight(z->parent->parent);
+                }
+            } else { // зеркально: родитель — правый ребёнок деда
+                Node* uncle = z->parent->parent->left;
+                if (uncle->color == RED) {                 // случай 1
+                    z->parent->color = BLACK;
+                    uncle->color = BLACK;
+                    z->parent->parent->color = RED;
+                    z = z->parent->parent;
+                } else {
+                    if (z == z->parent->left) {            // случай 2 (зигзаг)
+                        z = z->parent;
+                        rotateRight(z);
+                    }
+                    z->parent->color = BLACK;              // случай 3 (прямая)
+                    z->parent->parent->color = RED;
+                    rotateLeft(z->parent->parent);
+                }
+            }
+        }
+        root->color = BLACK;   // правило 2: корень всегда чёрный
+    }
+
+    /**
+     * @brief Рекурсивно освобождает память поддерева
+     */
+    void destroy(Node* node) {
+        if (node == nil) return;
+        destroy(node->left);
+        destroy(node->right);
+        delete node;
+    }
+
+public:
+    RBTree() {
+        nil = new Node("");
+        nil->color = BLACK;
+        nil->left = nil->right = nil->parent = nil;
+        root = nil;
+    }
+    ~RBTree() {
+        destroy(root);
+        delete nil;
+    }
+
+    /**
+     * @brief Вставка рейса
+     *
+     * Сначала обычный спуск BST до места вставки. Если ключ уже есть —
+     * добавляем рейс в вектор узла. Иначе создаём новый красный узел
+     * и запускаем восстановление свойств.
+     *
+     * @param f рейс для вставки
+     */
+    void insert(const Flight& f) {
+        Node* y = nil;
+        Node* x = root;
+        while (x != nil) {
+            y = x;
+            if (f.airline < x->key)       x = x->left;
+            else if (f.airline > x->key)  x = x->right;
+            else { x->items.push_back(f); return; }  // ключ уже есть
+        }
+        Node* z = new Node(f.airline);
+        z->items.push_back(f);
+        z->parent = y;
+        z->left = nil;
+        z->right = nil;
+        if (y == nil)                 root = z;       // дерево было пустым
+        else if (f.airline < y->key)  y->left = z;
+        else                          y->right = z;
+        insertFixup(z);
+    }
+
+    /**
+     * @brief Поиск всех рейсов по ключу
+     * @param key искомое название авиакомпании
+     * @return вектор указателей на найденные рейсы
+     */
+    std::vector<const Flight*> search(const std::string& key) const {
+        std::vector<const Flight*> result;
+        Node* cur = root;
+        while (cur != nil) {
+            if (key < cur->key)       cur = cur->left;
+            else if (key > cur->key)  cur = cur->right;
+            else {
+                for (const Flight& f : cur->items) result.push_back(&f);
+                return result;
+            }
+        }
+        return result;
+    }
+};
+
+int main() {
+    std::vector<Flight> arr = generateFlights(20000, 52);
+
+    BST bst;
+    RBTree rbt;
     for (const Flight& f : arr) {
-        tree.insert(f);
+        bst.insert(f);
+        rbt.insert(f);
     }
 
     std::string key = arr[0].airline;
-    std::cout << "Looking for : " << key << "\n";
-
-    std::vector<const Flight*> found = tree.search(key);
-    std::cout << "BST found: " << found.size() << "\n";
-
-    // сверим с линейным поиском — должно совпасть
-    std::vector<const Flight*> check = linearSearch(arr, key);
-    std::cout << "Linear found: " << check.size() << "\n";
+    std::cout << "Looking for: " << key << "\n";
+    std::cout << "Linear: " << linearSearch(arr, key).size() << "\n";
+    std::cout << "BST: " << bst.search(key).size() << "\n";
+    std::cout << "RBT: " << rbt.search(key).size() << "\n";
 
     return 0;
 }
