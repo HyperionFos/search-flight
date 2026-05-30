@@ -101,17 +101,123 @@ std::vector<const Flight*> linearSearch(const std::vector<Flight>& flights,
     return result;
 }
 
-int main() {
-    std::vector<Flight> arr = generateFlights(200, 52);
-    std::string key = arr[0].airline; 
-    std::cout << "Looking for: " << key << "\n";
+/**
+ * @brief Бинарное дерево поиска (BST) по ключу airline
+ *
+ * Несбалансированное дерево. Так как ключи (airline) не уникальны,
+ * каждый узел хранит вектор ВСЕХ рейсов с данным ключом. Поэтому поиск
+ * всех вхождений сводится к поиску одного узла.
+ *
+ * Сложность поиска: O(h), где h — высота дерева (в среднем O(log n)).
+ */
+class BST {
+private:
+    struct Node {
+        std::string key;               // ключ — название авиакомпании
+        std::vector<Flight> items;     // все рейсы с этим ключом
+        Node* left = nullptr;
+        Node* right = nullptr;
+        Node(const std::string& k) : key(k) {}
+    };
 
-    std::vector<const Flight*> found = linearSearch(arr, key);
-    std::cout << "Found: " << found.size() << "\n";
-    for (const Flight* f : found) {
-        std::cout << "  " << f->flightNumber << " | " << f->airline
-                  << " | " << f->arrivalDate << " " << f->arrivalTime
-                  << " | passengers = " << f->passengers << "\n";
+    Node* root = nullptr;
+
+    /**
+     * @brief Рекурсивно освобождает память поддерева
+     * @param node корень поддерева
+     */
+    void destroy(Node* node) {
+        if (node == nullptr) return;
+        destroy(node->left);
+        destroy(node->right);
+        delete node;
     }
+
+public:
+    BST() = default;
+    ~BST() { destroy(root); }
+
+    /**
+     * @brief Вставка рейса в дерево
+     *
+     * Спускается по дереву, сравнивая ключи. Если узел с таким ключом
+     * найден — добавляет рейс в его вектор. Иначе создает новый узел.
+     *
+     * @param f рейс для вставки
+     */
+    void insert(const Flight& f) {
+        if (root == nullptr) {
+            root = new Node(f.airline);
+            root->items.push_back(f);
+            return;
+        }
+        Node* cur = root;
+        while (true) {
+            if (f.airline < cur->key) {
+                if (cur->left == nullptr) {
+                    cur->left = new Node(f.airline);
+                    cur->left->items.push_back(f);
+                    return;
+                }
+                cur = cur->left;
+            } else if (f.airline > cur->key) {
+                if (cur->right == nullptr) {
+                    cur->right = new Node(f.airline);
+                    cur->right->items.push_back(f);
+                    return;
+                }
+                cur = cur->right;
+            } else {
+                cur->items.push_back(f); // ключ уже есть — добавляем в вектор
+                return;
+            }
+        }
+    }
+
+    /**
+     * @brief Поиск всех рейсов по ключу
+     *
+     * Спускается по дереву, пока не найдет узел с нужным ключом.
+     *
+     * @param key искомое название авиакомпании
+     * @return вектор указателей на найденные рейсы (пустой, если не найдено)
+     */
+    std::vector<const Flight*> search(const std::string& key) const {
+        std::vector<const Flight*> result;
+        Node* cur = root;
+        while (cur != nullptr) {
+            if (key < cur->key) {
+                cur = cur->left;
+            } else if (key > cur->key) {
+                cur = cur->right;
+            } else {
+                for (const Flight& f : cur->items) {
+                    result.push_back(&f);
+                }
+                return result;
+            }
+        }
+        return result;
+    }
+};
+
+int main() {
+    std::vector<Flight> arr = generateFlights(2000, 52);
+
+    BST tree;
+    for (const Flight& f : arr) {
+        tree.insert(f);
+    }
+
+    std::string key = arr[0].airline;
+    std::cout << "Looking for : " << key << "\n";
+
+    std::vector<const Flight*> found = tree.search(key);
+    std::cout << "BST found: " << found.size() << "\n";
+
+    // сверим с линейным поиском — должно совпасть
+    std::vector<const Flight*> check = linearSearch(arr, key);
+    std::cout << "Linear found: " << check.size() << "\n";
+
     return 0;
 }
