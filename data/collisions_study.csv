@@ -1,0 +1,15 @@
+experiment,param,collisions
+table_size,17,35
+table_size,31,34
+table_size,53,18
+table_size,101,9
+table_size,211,5
+table_size,401,2
+table_size,809,3
+unique_keys,10,0
+unique_keys,25,0
+unique_keys,50,0
+unique_keys,100,9
+unique_keys,200,55
+unique_keys,400,209
+unique_keys,800,589

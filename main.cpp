@@ -26,12 +26,14 @@ struct Flight {
 };
 
 /**
- * @brief Генерирует массив из n случайных рейсов.
- * 
+ * @brief Генерирует массив из n случайных рейсов
+ *
+ * Авиакомпания берётся из фиксированного списка → ключи (airline) повторяются.
+ * Номер рейса уникален (префикс компании + индекс), поэтому ключом быть не может.
+ *
  * @param n размер массива
- * @param rng генератор случайных чисел
- * @return вектор Flight; airline повторяется (~50 вариантов),
- * flightNumber уникален (префикс компании + порядковый номер).
+ * @param seed зерно генератора (для воспроизводимости)
+ * @return вектор сгенерированных рейсов
  */
 std::vector<Flight> generateFlights(size_t n, unsigned seed) {
     std::mt19937 rng(seed);
@@ -51,8 +53,7 @@ std::vector<Flight> generateFlights(size_t n, unsigned seed) {
     std::uniform_int_distribution<int> hour(0, 23);
     std::uniform_int_distribution<int> minute(0, 59);
     std::uniform_int_distribution<int> passengers(50, 350);
-    std::uniform_int_distribution<int> flightNo(100, 9999);
-
+    
     std::vector<Flight> flights;
     flights.reserve(n);
 
@@ -521,21 +522,74 @@ std::vector<const Flight*> multimapSearch(const std::multimap<std::string, Fligh
  * @return среднее время одного поиска, нс
  */
 template <typename SearchFunc>
-double measureSearch(SearchFunc search, const std::vector<std::string>& keys) {
-    long long sink = 0;   // защита от выбрасывания вызовов оптимизатором
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-    for (const std::string& key : keys) {
-        std::vector<const Flight*> found = search(key);
-        sink += found.size();
+double measureSearch(SearchFunc search, const std::vector<std::string>& keys, int repeats = 5) {
+    double best = 1e18;   // минимальное время из repeats прогонов
+    for (int r = 0; r < repeats; ++r) {
+        long long sink = 0;
+        auto t1 = std::chrono::high_resolution_clock::now();
+        for (const std::string& key : keys) {
+            std::vector<const Flight*> found = search(key);
+            sink += found.size();
+        }
+        auto t2 = std::chrono::high_resolution_clock::now();
+        volatile long long keep = sink; (void)keep;
+        double ns = std::chrono::duration<double, std::nano>(t2 - t1).count() / keys.size();
+        if (ns < best) best = ns;
     }
-    auto t2 = std::chrono::high_resolution_clock::now();
+    return best;
+}
 
-    volatile long long keep = sink;   // ещё раз страхуемся, чтобы sink "использовался"
-    (void)keep;
+/**
+ * @brief Подсчёт коллизий хэш-таблицы при заданном числе уникальных ключей
+ *
+ * Генерирует count записей с uniqueKeys различными синтетическими ключами
+ * ("AL0", "AL1", ...) и вставляет их в таблицу размера tableSize.
+ *
+ * @param uniqueKeys число различных ключей
+ * @param tableSize размер хэш-таблицы
+ * @param count общее число вставляемых записей
+ * @return число коллизий
+ */
+long long countCollisionsForKeys(size_t uniqueKeys, size_t tableSize, size_t count) {
+    HashTable ht(tableSize);
+    std::mt19937 rng(52);
+    std::uniform_int_distribution<size_t> pick(0, uniqueKeys - 1);
+    for (size_t i = 0; i < count; ++i) {
+        Flight f;
+        f.airline = "AL" + std::to_string(pick(rng));
+        ht.insert(f);
+    }
+    return ht.getCollisions();
+}
 
-    double totalNs = std::chrono::duration<double, std::nano>(t2 - t1).count();
-    return totalNs / keys.size();
+/**
+ * @brief Исследование коллизий хэш-функции (эксперименты 2 и 3)
+ *
+ * Эксперимент 2: фиксируем ~50 ключей (100000 рейсов), меняем размер таблицы.
+ * Эксперимент 3: фиксируем таблицу (211), меняем число уникальных ключей.
+ * Результаты пишутся в data/collisions_study.csv.
+ */
+void studyCollisions() {
+    std::ofstream out("data/collisions_study.csv");
+    out << "experiment,param,collisions\n";
+
+    // Эксперимент 2: коллизии vs размер таблицы (на реальных ~50 компаниях)
+    std::vector<Flight> arr = generateFlights(100000, 52);
+    std::vector<size_t> tableSizes = {17, 31, 53, 101, 211, 401, 809};
+    for (size_t ts : tableSizes) {
+        HashTable ht(ts);
+        for (const Flight& f : arr) ht.insert(f);
+        out << "table_size," << ts << ',' << ht.getCollisions() << '\n';
+    }
+
+    // Эксперимент 3: коллизии vs число уникальных ключей (таблица 211)
+    std::vector<size_t> keyCounts = {10, 25, 50, 100, 200, 400, 800};
+    for (size_t k : keyCounts) {
+        long long col = countCollisionsForKeys(k, 211, 100000);
+        out << "unique_keys," << k << ',' << col << '\n';
+    }
+
+    std::cout << "Collisions: data/collisions_study.csv\n";
 }
 
 int main() {
@@ -543,15 +597,13 @@ int main() {
     std::vector<size_t> sizes = {
         100, 200, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000
     };
-    const int QUERIES = 10;     // число поисков на каждой размерности
+    const int QUERIES = 50;     // число поисков на каждой размерности
     const size_t TABLE_SIZE = 101;
 
     std::ofstream out("data/timings.csv");
-    out << "size,linear,bst,rbt,hash,multimap\n";
+    out << "size,linear,bst,rbt,hash,multimap,collisions\n";
 
     std::mt19937 rng(52);   // для выбора случайных ключей
-
-    std::cout << "size    linear  bst     rbt     hash    multimap  (ns/time of search)\n";
 
     for (size_t n : sizes) {
         // генерируем данные
@@ -590,13 +642,14 @@ int main() {
             [&](const std::string& k) { return multimapSearch(mm, k); }, keys);
 
         out << n << ',' << tLinear << ',' << tBst << ',' << tRbt << ','
-            << tHash << ',' << tMm << '\n';
+            << tHash << ',' << tMm << ',' << ht.getCollisions() << '\n';
 
         std::cout << n << "\t"
                   << tLinear << "\t" << tBst << "\t" << tRbt << "\t"
                   << tHash << "\t" << tMm << "\n";
     }
 
+    studyCollisions();
     std::cout << "\nTimings in: data/timings.csv\n";
     return 0;
 }
