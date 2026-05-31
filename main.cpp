@@ -376,14 +376,127 @@ public:
     }
 };
 
+/**
+ * @brief Хэш-таблица по ключу airline с разрешением коллизий цепочками
+ *
+ * Каждая корзина (bucket) — связанный список узлов. Хэш-функция —
+ * полиномиальная свёртка строки (схема Горнера, множитель 31) по модулю
+ * размера таблицы. Ключи не уникальны: узел хранит вектор всех рейсов
+ * с данным ключом. Коллизии (новый ключ попал в непустую корзину)
+ * подсчитываются.
+ *
+ * Сложность поиска: O(1) в среднем.
+ */
+class HashTable {
+private:
+    struct Node {
+        std::string key;
+        std::vector<Flight> items;
+        Node* next = nullptr;
+        Node(const std::string& k) : key(k) {}
+    };
+
+    std::vector<Node*> buckets;
+    size_t tableSize;
+    long long collisions = 0;
+
+    /**
+     * @brief Хэш-функция: строка -> индекс корзины
+     *
+     * Полиномиальный хэш (схема Горнера): h = h * 31 + символ.
+     * В конце берётся остаток по размеру таблицы.
+     *
+     * @param key ключ (название авиакомпании)
+     * @return индекс корзины в диапазоне [0, tableSize)
+     */
+    size_t hash(const std::string& key) const {
+        size_t h = 0;
+        for (unsigned char c : key) {
+            h = h * 31 + c;
+        }
+        return h % tableSize;
+    }
+
+public:
+    /**
+     * @brief Конструктор
+     * @param size количество корзин в таблице
+     */
+    HashTable(size_t size) : buckets(size, nullptr), tableSize(size) {}
+
+    ~HashTable() {
+        for (Node* head : buckets) {
+            while (head != nullptr) {
+                Node* next = head->next;
+                delete head;
+                head = next;
+            }
+        }
+    }
+
+    /**
+     * @brief Вставка рейса
+     *
+     * Считает индекс корзины. Если ключ уже есть в корзине — добавляет рейс
+     * в его вектор. Иначе создаёт новый узел; если корзина была непуста —
+     * фиксирует коллизию.
+     *
+     * @param f рейс для вставки
+     */
+    void insert(const Flight& f) {
+        size_t idx = hash(f.airline);
+        // ищем узел с таким же ключом в цепочке
+        for (Node* n = buckets[idx]; n != nullptr; n = n->next) {
+            if (n->key == f.airline) {
+                n->items.push_back(f);
+                return;
+            }
+        }
+        // новый ключ: если корзина уже занята — это коллизия
+        if (buckets[idx] != nullptr) {
+            collisions++;
+        }
+        Node* node = new Node(f.airline);
+        node->items.push_back(f);
+        node->next = buckets[idx];   // вставка в начало цепочки
+        buckets[idx] = node;
+    }
+
+    /**
+     * @brief Поиск всех рейсов по ключу
+     * @param key искомое название авиакомпании
+     * @return вектор указателей на найденные рейсы
+     */
+    std::vector<const Flight*> search(const std::string& key) const {
+        std::vector<const Flight*> result;
+        size_t idx = hash(key);
+        for (Node* n = buckets[idx]; n != nullptr; n = n->next) {
+            if (n->key == key) {
+                for (const Flight& f : n->items) {
+                    result.push_back(&f);
+                }
+                return result;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * @brief Число зафиксированных коллизий
+     */
+    long long getCollisions() const { return collisions; }
+};
+
 int main() {
     std::vector<Flight> arr = generateFlights(20000, 52);
 
     BST bst;
     RBTree rbt;
+    HashTable ht(101);
     for (const Flight& f : arr) {
         bst.insert(f);
         rbt.insert(f);
+        ht.insert(f);
     }
 
     std::string key = arr[0].airline;
@@ -391,6 +504,7 @@ int main() {
     std::cout << "Linear: " << linearSearch(arr, key).size() << "\n";
     std::cout << "BST: " << bst.search(key).size() << "\n";
     std::cout << "RBT: " << rbt.search(key).size() << "\n";
-
+    std::cout << "Hash: " << ht.search(key).size() << "\n";
+    std::cout << "Collisions: " << ht.getCollisions() << "\n";
     return 0;
 }
