@@ -1,4 +1,4 @@
 *.exe
 *.o
-docs/html/
+docs/
 __pycache__/
