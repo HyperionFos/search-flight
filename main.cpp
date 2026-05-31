@@ -508,27 +508,95 @@ std::vector<const Flight*> multimapSearch(const std::multimap<std::string, Fligh
     return result;
 }
 
-int main() {
-    std::vector<Flight> arr = generateFlights(20000, 52);
+/**
+ * @brief Замер среднего времени одного поиска
+ *
+ * Прогоняет функцию поиска на наборе ключей и возвращает среднее время
+ * одного поиска в наносекундах. Результат каждого поиска аккумулируется,
+ * чтобы компилятор не выбросил вызовы при оптимизации.
+ *
+ * @tparam SearchFunc тип функции/лямбды поиска: (const std::string&) -> vector
+ * @param search функция поиска (ключ -> результат)
+ * @param keys набор ключей, по которым выполняется поиск
+ * @return среднее время одного поиска, нс
+ */
+template <typename SearchFunc>
+double measureSearch(SearchFunc search, const std::vector<std::string>& keys) {
+    long long sink = 0;   // защита от выбрасывания вызовов оптимизатором
 
-    BST bst;
-    RBTree rbt;
-    HashTable ht(101);
-    std::multimap<std::string, Flight> mm;
-    for (const Flight& f : arr) {
-        bst.insert(f);
-        rbt.insert(f);
-        ht.insert(f);
-        mm.insert({f.airline, f});
+    auto t1 = std::chrono::high_resolution_clock::now();
+    for (const std::string& key : keys) {
+        std::vector<const Flight*> found = search(key);
+        sink += found.size();
+    }
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    volatile long long keep = sink;   // ещё раз страхуемся, чтобы sink "использовался"
+    (void)keep;
+
+    double totalNs = std::chrono::duration<double, std::nano>(t2 - t1).count();
+    return totalNs / keys.size();
+}
+
+int main() {
+    // размерности массива (пункт 3: от 100 до 1000000)
+    std::vector<size_t> sizes = {
+        100, 200, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000
+    };
+    const int QUERIES = 10;     // число поисков на каждой размерности
+    const size_t TABLE_SIZE = 101;
+
+    std::ofstream out("data/timings.csv");
+    out << "size,linear,bst,rbt,hash,multimap\n";
+
+    std::mt19937 rng(52);   // для выбора случайных ключей
+
+    std::cout << "size    linear  bst     rbt     hash    multimap  (ns/time of search)\n";
+
+    for (size_t n : sizes) {
+        // генерируем данные
+        std::vector<Flight> arr = generateFlights(n, 52);
+
+        // строим все структуры (вне замера времени поиска)
+        BST bst;
+        RBTree rbt;
+        HashTable ht(TABLE_SIZE);
+        std::multimap<std::string, Flight> mm;
+        for (const Flight& f : arr) {
+            bst.insert(f);
+            rbt.insert(f);
+            ht.insert(f);
+            mm.insert({f.airline, f});
+        }
+
+        // готовим набор ключей: случайные существующие + несколько отсутствующих
+        std::vector<std::string> keys;
+        std::uniform_int_distribution<size_t> pick(0, arr.size() - 1);
+        for (int i = 0; i < QUERIES; ++i) {
+            if (i % 10 == 0) keys.push_back("BIBKA");          // заведомо нет такого
+            else             keys.push_back(arr[pick(rng)].airline);
+        }
+
+        // замеряем каждый способ (оборачиваем в лямбды с единым интерфейсом)
+        double tLinear = measureSearch(
+            [&](const std::string& k) { return linearSearch(arr, k); }, keys);
+        double tBst = measureSearch(
+            [&](const std::string& k) { return bst.search(k); }, keys);
+        double tRbt = measureSearch(
+            [&](const std::string& k) { return rbt.search(k); }, keys);
+        double tHash = measureSearch(
+            [&](const std::string& k) { return ht.search(k); }, keys);
+        double tMm = measureSearch(
+            [&](const std::string& k) { return multimapSearch(mm, k); }, keys);
+
+        out << n << ',' << tLinear << ',' << tBst << ',' << tRbt << ','
+            << tHash << ',' << tMm << '\n';
+
+        std::cout << n << "\t"
+                  << tLinear << "\t" << tBst << "\t" << tRbt << "\t"
+                  << tHash << "\t" << tMm << "\n";
     }
 
-    std::string key = arr[0].airline;
-    std::cout << "Looking for: " << key << "\n";
-    std::cout << "Linear: " << linearSearch(arr, key).size() << "\n";
-    std::cout << "BST: " << bst.search(key).size() << "\n";
-    std::cout << "RBT: " << rbt.search(key).size() << "\n";
-    std::cout << "Hash: " << ht.search(key).size() << "\n";
-    std::cout << "Collisions: " << ht.getCollisions() << "\n";
-    std::cout << "Multimap: " << multimapSearch(mm, key).size() << "\n";
+    std::cout << "\nTimings in: data/timings.csv\n";
     return 0;
 }
