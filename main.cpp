@@ -6,6 +6,7 @@
 #include <chrono>
 #include <random>
 #include <iomanip>
+#include <map>
 
 
 /**
@@ -487,16 +488,38 @@ public:
     long long getCollisions() const { return collisions; }
 };
 
+/**
+ * @brief Поиск всех рейсов по ключу в multimap
+ *
+ * Использует equal_range, который возвращает диапазон
+ * всех записей с заданным ключом, и собирает их.
+ *
+ * @param mm ассоциативный массив "airline -> Flight"
+ * @param key искомая авиакомпания
+ * @return вектор указателей на найденные рейсы
+ */
+std::vector<const Flight*> multimapSearch(const std::multimap<std::string, Flight>& mm,
+                                          const std::string& key) {
+    std::vector<const Flight*> result;
+    auto range = mm.equal_range(key);
+    for (auto it = range.first; it != range.second; ++it) {
+        result.push_back(&it->second);
+    }
+    return result;
+}
+
 int main() {
     std::vector<Flight> arr = generateFlights(20000, 52);
 
     BST bst;
     RBTree rbt;
     HashTable ht(101);
+    std::multimap<std::string, Flight> mm;
     for (const Flight& f : arr) {
         bst.insert(f);
         rbt.insert(f);
         ht.insert(f);
+        mm.insert({f.airline, f});
     }
 
     std::string key = arr[0].airline;
@@ -506,5 +529,6 @@ int main() {
     std::cout << "RBT: " << rbt.search(key).size() << "\n";
     std::cout << "Hash: " << ht.search(key).size() << "\n";
     std::cout << "Collisions: " << ht.getCollisions() << "\n";
+    std::cout << "Multimap: " << multimapSearch(mm, key).size() << "\n";
     return 0;
 }
